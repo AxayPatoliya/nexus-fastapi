@@ -83,7 +83,8 @@ class FastAPIGenerator:
         model_name = model_config['name']
         fields = model_config['fields']
         
-        imports = set(['Column', 'Integer', 'DateTime'])
+        imports = {'Column', 'Integer'}
+        imports.update(self.get_sqlalchemy_type(f['type']) for f in fields)
         model_content = f'''from sqlalchemy import {', '.join(sorted(imports))}
 from core.database.base import Base
 from datetime import datetime

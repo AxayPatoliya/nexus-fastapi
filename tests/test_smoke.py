@@ -1,5 +1,7 @@
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -123,3 +125,61 @@ def test_scaffold_rejects_unknown_method(tmp_path):
     }
     with pytest.raises(ValueError, match="TRACE"):
         create_project(tmp_path / "bad", project_name="bad", config=config)
+
+
+ALL_TYPES_CONFIG = {
+    "project_name": "alltypes",
+    "apps": [
+        {
+            "name": "things",
+            "models": [
+                {
+                    "name": "Thing",
+                    "fields": [
+                        {"name": "a_string", "type": "string"},
+                        {"name": "a_text", "type": "text"},
+                        {"name": "an_int", "type": "integer"},
+                        {"name": "a_float", "type": "float"},
+                        {"name": "a_bool", "type": "boolean"},
+                        {"name": "a_date", "type": "datetime"},
+                        {"name": "a_json", "type": "json"},
+                    ],
+                }
+            ],
+        }
+    ],
+}
+
+
+def test_generated_app_boots_and_serves_crud(tmp_path):
+    """The generated project must import and handle a request, not just compile."""
+    pytest.importorskip("fastapi")
+    pytest.importorskip("sqlalchemy")
+    pytest.importorskip("httpx")
+    root = create_project(tmp_path / "alltypes", project_name="alltypes", config=ALL_TYPES_CONFIG)
+    script = (
+        "from fastapi.testclient import TestClient\n"
+        "from main import app\n"
+        "c = TestClient(app)\n"
+        "assert c.get('/health').status_code == 200\n"
+        "r = c.post('/api/things/', json={'a_string': 'x', 'an_int': 1})\n"
+        "assert r.status_code == 200, r.text\n"
+        "assert c.get('/api/things/').json()[0]['a_string'] == 'x'\n"
+        "id_ = r.json()['id']\n"
+        "r = c.get(f'/api/things/{id_}')\n"
+        "assert r.status_code == 200, r.text\n"
+        "assert r.json()['a_string'] == 'x'\n"
+        "r = c.put(f'/api/things/{id_}', json={'a_string': 'y'})\n"
+        "assert r.status_code == 200, r.text\n"
+        "r = c.get(f'/api/things/{id_}')\n"
+        "assert r.status_code == 200, r.text\n"
+        "assert r.json()['a_string'] == 'y'\n"
+        "r = c.delete(f'/api/things/{id_}')\n"
+        "assert r.status_code == 200, r.text\n"
+        "assert c.get(f'/api/things/{id_}').status_code == 404\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-W", "ignore", "-c", script],
+        cwd=root, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
